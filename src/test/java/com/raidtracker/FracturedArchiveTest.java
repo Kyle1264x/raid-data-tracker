@@ -168,6 +168,16 @@ public class FracturedArchiveTest extends TestCase
 	}
 
 	@Test
+	public void chatRecordsGroupedCompletionCounts() throws IOException
+	{
+		openAccount();
+		session.onGameMessage("Your completed Fractured Archive count is: 1,234.", false);
+		assertTrue(session.claim());
+
+		assertEquals(1234, fw.readFromFile(RaidType.TFA).get(0).getCompletionCount());
+	}
+
+	@Test
 	public void trackedInputsAreStoredWithTheChest() throws IOException
 	{
 		openAccount();
@@ -286,6 +296,39 @@ public class FracturedArchiveTest extends TestCase
 
 		session.onGameMessage("Other Player found something special: Horn of Bran", false);
 		assertEquals(1, fw.readFromFile(RaidType.TFA).get(0).getUniques().size());
+	}
+
+	@Test
+	public void teammateLeavingAfterCompletionKeepsTheTeamSizeAndSplit() throws IOException
+	{
+		openAccount();
+		namePlayer("Disco Turtle");
+		session.setSplitRules(false, 1_000_000L);
+		session.setPartySize(5);
+		session.setPartySize(4);
+		session.onGameMessage("The Fractured Archive: Total completion time: 12:00.", true);
+		session.setPartySize(2);
+		assertTrue(session.claimRewardWindow(
+			Arrays.asList(chestItem("Horn of Bran", RaidUniques.HORN_OF_BRAN.getItemID(), 1, 8_000_000)),
+			"Disco Turtle"));
+
+		RaidTracker saved = fw.readFromFile(RaidType.TFA).get(0);
+		assertEquals(4, saved.getTeamSize());
+		assertEquals(2_000_000L, saved.getLootSplitReceived());
+		assertEquals(6_000_000L, saved.getLootSplitPaid());
+	}
+
+	@Test
+	public void lateFirstPartySizeIsStillRecorded() throws IOException
+	{
+		openAccount();
+		session.onGameMessage("The Fractured Archive: Total completion time: 12:00.", true);
+		session.setPartySize(0);
+		session.setPartySize(3);
+		session.setPartySize(1);
+		session.finished();
+
+		assertEquals(3, fw.readFromFile(RaidType.TFA).get(0).getTeamSize());
 	}
 
 	@Test

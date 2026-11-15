@@ -42,7 +42,7 @@ public final class FracturedArchiveSession {
 	private static final Pattern RAID_COMPLETE = Pattern.compile(
 		"^The Fractured Archive: Total completion time: (?<duration>(?:\\d+:)?\\d+:\\d+(?:\\.\\d+)?)");
 	private static final Pattern KILL_COUNT = Pattern.compile(
-		"^Your completed Fractured Archive count is: (?<count>\\d+)");
+		"^Your completed Fractured Archive count is: (?<count>\\d+(?:,\\d{3})*)");
 	private static final Pattern DEATH = Pattern.compile(
 		"^(?:You have|.+ has) died\\. Total deaths: (?<count>\\d+)\\.?$");
 	private static final Pattern SPECIAL = Pattern.compile("^(?<player>.+?) found something special: (?<item>.+?)\\.?$");
@@ -359,7 +359,7 @@ public final class FracturedArchiveSession {
 		}
 		matcher = KILL_COUNT.matcher(message);
 		if (matcher.find()) {
-			int count = Integer.parseInt(matcher.group("count"));
+			int count = Integer.parseInt(matcher.group("count").replace(",", ""));
 			if (count > 0) {
 				killCount = count;
 			}
@@ -382,9 +382,12 @@ public final class FracturedArchiveSession {
 		}
 	}
 
-	/** Real party size. A solo is 1. Sizes outside 1 to 8 are ignored. */
+	/** Records the HUD party size and keeps the last known size once the raid completes. */
 	public void setPartySize(int size) {
 		if (blocked() || ignoreHud || size < 1 || size > 8) {
+			return;
+		}
+		if (overall > 0 && party >= 1) {
 			return;
 		}
 		party = size;
