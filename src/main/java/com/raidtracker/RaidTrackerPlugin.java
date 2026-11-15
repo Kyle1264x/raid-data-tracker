@@ -124,6 +124,7 @@ public class RaidTrackerPlugin extends Plugin
 	private RaidTrackerPanel panel;
 	private NavigationButton navButton;
 	private FracturedArchiveSession archive;
+	private String boundAccountName;
 	/** Ticks left before an empty reward container is accepted as the real chest. */
 	private int archiveEmptyChestTicks;
 
@@ -162,10 +163,7 @@ public class RaidTrackerPlugin extends Plugin
 
 		clientToolbar.addNavigation(navButton);
 
-		archive = new FracturedArchiveSession(client, () -> raidTracker, () -> fw);
-		archive.setSplitRules(config.defaultFFA(), config.FFACutoff());
-		archive.setUniquePrice(this::archiveUniquePrice);
-		panel.setLiveArchiveRaid(archive::liveClaim);
+		startArchiveSession();
 
 		if (componentManager == null) {
 			componentManager = injector.getInstance(ComponentManager.class);
@@ -296,12 +294,6 @@ public class RaidTrackerPlugin extends Plugin
 			return;
 		}
 
-		if (event.getGameState() == GameState.LOGGING_IN)
-		{
-			// The login name is often blank here. The character folder is set once the player exists.
-			bindAccountFolder();
-		}
-
 		if (client.getGameState() == GameState.LOGGED_IN) {
 			// skip event while the game decides if the player belongs in a raid or not
 			if (client.getLocalPlayer() == null
@@ -334,6 +326,10 @@ public class RaidTrackerPlugin extends Plugin
 			return;
 		}
 
+		if (archive != null && !archiveAccountReady()) {
+			return;
+		}
+
 		checkChatMessage(event, raidTracker);
 	}
 
@@ -344,12 +340,17 @@ public class RaidTrackerPlugin extends Plugin
             return;
         }
 
-        if (isFirstGameTick) {
+        boolean firstGameTick = isFirstGameTick;
+        if (firstGameTick) {
+            if (!bindAccountFolder()) {
+                return;
+            }
             isFirstGameTick = false;
             raidTracker.setProfileType(String.valueOf(RuneScapeProfileType.getCurrent(client)));
             raidTracker.setAccountHash(client.getAccountHash());
-            bindAccountFolder();
-            SwingUtilities.invokeLater(() -> panel.loadRTList());
+            if (panel != null) {
+                SwingUtilities.invokeLater(() -> panel.loadRTList());
+            }
         }
 
 		if (archive != null) {
@@ -402,6 +403,9 @@ public class RaidTrackerPlugin extends Plugin
 				if (archive.takeRewardClosed()) {
 					archiveEmptyChestTicks = 0;
 				}
+				if (firstGameTick && chestOpen && (!archive.isClaimWindowOpen() || archive.openChestNeedsLoot())) {
+					noteEmptyArchiveChest();
+				}
 				if (chestOpen && archiveEmptyChestTicks > 0
 					&& (!archive.isClaimWindowOpen() || archive.openChestNeedsLoot())) {
 					if (!logArchiveReward(false)) {
@@ -449,7 +453,7 @@ public class RaidTrackerPlugin extends Plugin
 
 	@Subscribe
 	public void onHitsplatApplied(HitsplatApplied event) {
-		if (archive == null || event.getHitsplat() == null || !(event.getActor() instanceof NPC)) {
+		if (archive == null || event.getHitsplat() == null || !(event.getActor() instanceof NPC) || !archiveAccountReady()) {
 			return;
 		}
 		Hitsplat hitsplat = event.getHitsplat();
@@ -458,7 +462,7 @@ public class RaidTrackerPlugin extends Plugin
 
 	@Subscribe
 	public void onNpcChanged(NpcChanged event) {
-		if (archive == null || event.getNpc() == null) {
+		if (archive == null || event.getNpc() == null || !archiveAccountReady()) {
 			return;
 		}
 		archive.onOcellusNpc(event.getNpc().getId());
@@ -467,7 +471,7 @@ public class RaidTrackerPlugin extends Plugin
 	@Subscribe
 	public void onAnimationChanged(AnimationChanged event) {
 		Actor actor = event.getActor();
-		if (archive == null || !(actor instanceof NPC)) {
+		if (archive == null || !(actor instanceof NPC) || !archiveAccountReady()) {
 			return;
 		}
 		archive.onOcellusAnimation(((NPC) actor).getId(), actor.getAnimation());
@@ -479,7 +483,7 @@ public class RaidTrackerPlugin extends Plugin
 		if (message.getNamespace().equals(TFA_EVENT_NAMESPACE) && message.getName().equals(TOA_EVENT_NAME_POINTS)) {
 			Object version = message.getData() == null ? null : message.getData().get("version");
 			Object personal = message.getData() == null ? null : message.getData().get("personalPoints");
-			if (archive != null && Integer.valueOf(1).equals(version) && personal instanceof Integer) {
+			if (archive != null && Integer.valueOf(1).equals(version) && personal instanceof Integer && archiveAccountReady()) {
 				archive.noteExternalPoints((Integer) personal);
 			}
 			return;
@@ -661,7 +665,7 @@ public class RaidTrackerPlugin extends Plugin
 
 	@Subscribe
 	public void onItemContainerChanged(ItemContainerChanged event) {
-		if (event.getContainerId() != InventoryID.TFA_CHESTS || archive == null) {
+		if (event.getContainerId() != InventoryID.TFA_CHESTS || archive == null || !archiveAccountReady()) {
 			return;
 		}
 		// A full chest line already has its items. A line resumed before the container filled still needs them.
@@ -689,7 +693,7 @@ public class RaidTrackerPlugin extends Plugin
 	 * The log is written even when the side panel is closed.
 	 */
 	private boolean logArchiveReward(boolean allowEmpty) {
-		if (archive == null || WorldUtils.playerOnUntrackedWorld(client)) {
+		if (archive == null || WorldUtils.playerOnUntrackedWorld(client) || !archiveAccountReady()) {
 			return false;
 		}
 		// The chest can load before the first settle tick. Resume first so this container updates that row.
@@ -723,7 +727,7 @@ public class RaidTrackerPlugin extends Plugin
 	}
 
 	private void noteEmptyArchiveChest() {
-		if (archive == null || archiveEmptyChestTicks > 0 || WorldUtils.playerOnUntrackedWorld(client)) {
+		if (archive == null || archiveEmptyChestTicks > 0 || WorldUtils.playerOnUntrackedWorld(client) || !archiveAccountReady()) {
 			return;
 		}
 		if (archive.isClaimWindowOpen() && !archive.openChestNeedsLoot()) {
@@ -1275,12 +1279,39 @@ public class RaidTrackerPlugin extends Plugin
 		return RT;
 	}
 
-	/** Use the character name, not the login name. A blank name must not select the shared plugin folder. */
-	private void bindAccountFolder() {
-		if (fw == null || client.getLocalPlayer() == null || client.getLocalPlayer().getName() == null) {
-			return;
+	private void startArchiveSession() {
+		archive = new FracturedArchiveSession(client, () -> raidTracker, () -> fw);
+		archive.setSplitRules(config.defaultFFA(), config.FFACutoff());
+		archive.setUniquePrice(this::archiveUniquePrice);
+		if (panel != null) {
+			panel.setLiveArchiveRaid(archive::liveClaim);
 		}
-		String name = Text.toJagexName(client.getLocalPlayer().getName());
+	}
+
+	/** Archive events can arrive before the first game tick after login. */
+	private boolean archiveAccountReady() {
+		return !isFirstGameTick || bindAccountFolder();
+	}
+
+	private boolean bindAccountFolder() {
+		if (fw == null || !archiveLocationReady()) {
+			return false;
+		}
+		String playerName = client.getLocalPlayer().getName();
+		if (playerName == null) {
+			return false;
+		}
+		String name = Text.toJagexName(playerName);
+		if (name.isBlank()) {
+			return false;
+		}
+		if (boundAccountName != null && !boundAccountName.equalsIgnoreCase(name)) {
+			// Save completed raids and close claims in the previous character's folder.
+			settleArchive(false);
+			startArchiveSession();
+			replaceRaidTracker();
+		}
+		boundAccountName = name;
 		if (fw.updateUsername(name) && panel != null) {
 			SwingUtilities.invokeLater(() -> {
 				if (panel != null) {
@@ -1288,6 +1319,7 @@ public class RaidTrackerPlugin extends Plugin
 				}
 			});
 		}
+		return true;
 	}
 
 	/** The reward chest widget. Shutdown uses this so a restart can fill the raid that is still open. */
@@ -1364,22 +1396,25 @@ public class RaidTrackerPlugin extends Plugin
 	 */
 	private void finishArchiveNow(boolean chestStillOpen)
 	{
+		showArchiveClaim(settleArchive(chestStillOpen));
+	}
+
+	private RaidTracker settleArchive(boolean chestStillOpen) {
 		archiveEmptyChestTicks = 0;
-		if (archive != null && archive.hasUnstoredCompletion() && archive.foreignTracker()) {
+		if (archive == null) {
+			return null;
+		}
+		if (archive.hasUnstoredCompletion() && archive.foreignTracker()) {
+			RaidTracker previous = raidTracker;
 			replaceRaidTracker();
+			raidTracker.setAccountHash(previous.getAccountHash());
+			raidTracker.setProfileType(previous.getProfileType());
 		}
-		RaidTracker departedArchive = null;
-		if (archive != null) {
-			archive.finished(chestStillOpen);
-			archive.takeRewardClosed();
-			departedArchive = archive.takeDepartedRaid();
-			archive.takeLiveReset();
-		}
-		if (departedArchive != null) {
-			showArchiveClaim(departedArchive);
-			return;
-		}
-		replaceRaidTracker();
+		archive.finished(chestStillOpen);
+		archive.takeRewardClosed();
+		RaidTracker departedArchive = archive.takeDepartedRaid();
+		archive.takeLiveReset();
+		return departedArchive;
 	}
 
 	/** The chest line stays open so a teammate unique can be written onto that same raid. */

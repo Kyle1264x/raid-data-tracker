@@ -1,31 +1,41 @@
 package com.raidtracker;
 
+import com.google.gson.Gson;
 import com.google.inject.Guice;
 import com.google.inject.Inject;
+import com.raidtracker.archive.FracturedArchiveSession;
 import com.raidtracker.filereadwriter.FileReadWriter;
 import com.raidtracker.ui.RaidTrackerPanel;
 import com.raidtracker.ui.SplitChanger;
 import junit.framework.TestCase;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
+import net.runelite.api.GameState;
 import net.runelite.api.Item;
 import net.runelite.api.ItemComposition;
 import net.runelite.api.Player;
+import net.runelite.api.WorldType;
+import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.ChatMessage;
+import net.runelite.api.events.GameStateChanged;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.plugins.PluginManager;
 import net.runelite.client.ui.ClientToolbar;
 import net.runelite.http.api.item.ItemPrice;
 import org.junit.Before;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
 import org.junit.runner.RunWith;
 import org.mockito.Mock;
 import org.mockito.junit.MockitoJUnitRunner;
 import com.google.inject.testing.fieldbinder.Bind;
 import com.google.inject.testing.fieldbinder.BoundFieldModule;
 
+import java.lang.reflect.Field;
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -64,10 +74,51 @@ public class RaidTrackerTest extends TestCase
     @Inject
     private RaidTrackerPlugin raidTrackerPlugin;
 
+    @Rule
+    public TemporaryFolder storage = new TemporaryFolder();
+
     @Before
     public void setUp() {
         Guice.createInjector(BoundFieldModule.of(this)).injectMembers(this);
     }
+
+	@Test
+	public void archiveCompletionStaysWithThePreviousCharacter() throws ReflectiveOperationException
+	{
+		FileReadWriter files = new FileReadWriter();
+		files.setGson(new Gson());
+		files.setStorageRoot(storage.getRoot());
+		raidTrackerPlugin.setFw(files);
+		raidTrackerPlugin.setPanel(mock(RaidTrackerPanel.class));
+
+		Player player = mock(Player.class);
+		when(client.getLocalPlayer()).thenReturn(player);
+		when(client.getWorldType()).thenReturn(EnumSet.of(WorldType.MEMBERS));
+		when(client.getGameState()).thenReturn(GameState.LOGGED_IN);
+		when(player.getWorldLocation()).thenReturn(new WorldPoint(3200, 3200, 0));
+		when(player.getName()).thenReturn("First Player");
+
+		RaidTracker live = new RaidTracker();
+		FracturedArchiveSession previous = new FracturedArchiveSession(client, () -> live, () -> files);
+		Field archive = RaidTrackerPlugin.class.getDeclaredField("archive");
+		archive.setAccessible(true);
+		archive.set(raidTrackerPlugin, previous);
+
+		raidTrackerPlugin.onGameTick(null);
+		previous.onGameMessage("The Fractured Archive: Total completion time: 12:00.", true);
+		when(client.getGameState()).thenReturn(GameState.LOGIN_SCREEN);
+		raidTrackerPlugin.onGameStateChanged(mock(GameStateChanged.class));
+
+		when(client.getGameState()).thenReturn(GameState.LOGGED_IN);
+		when(player.getName()).thenReturn("Second Player");
+		raidTrackerPlugin.onGameTick(null);
+
+		assertTrue(files.readFromFile(RaidType.TFA).isEmpty());
+		files.updateUsername("First Player");
+		ArrayList<RaidTracker> raids = files.readFromFile(RaidType.TFA);
+		assertEquals(1, raids.size());
+		assertEquals(720, raids.get(0).getRaidTime());
+	}
 
 	@Test
 	public void TestLootSplits() {
