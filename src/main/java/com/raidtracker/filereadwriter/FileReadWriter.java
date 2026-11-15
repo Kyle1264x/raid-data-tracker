@@ -33,6 +33,7 @@ import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Objects;
 
 import static net.runelite.client.RuneLite.RUNELITE_DIR;
 import net.runelite.client.util.Text;
@@ -73,6 +74,7 @@ public class FileReadWriter {
 	@Getter
 	private String username;
 	private File storageRoot;
+	private File legacyRaidFolder;
 	private String coxDir;
 	private String tobDir;
 	private String toaDir;
@@ -478,13 +480,14 @@ public class FileReadWriter {
 		File base = storageRoot != null ? storageRoot : RUNELITE_DIR;
 		File dir = new File(base, "raid-data tracker");
 		IGNORE_RESULT(dir.mkdir());
-		dir = new File(dir, folder);
-		IGNORE_RESULT(dir.mkdir());
-		File dir_cox = new File(dir, "cox");
-		File dir_tob = new File(dir, "tob");
-		File dir_toa = new File(dir, "toa");
-		File dir_tfa = new File(dir, "tfa");
-        File dir_default = new File(dir, "unknown");
+		File characterFolder = new File(dir, folder);
+		IGNORE_RESULT(characterFolder.mkdir());
+		File existingRaidFolder = legacyRaidFolder != null ? legacyRaidFolder : characterFolder;
+		File dir_cox = new File(existingRaidFolder, "cox");
+		File dir_tob = new File(existingRaidFolder, "tob");
+		File dir_toa = new File(existingRaidFolder, "toa");
+		File dir_tfa = new File(characterFolder, "tfa");
+        File dir_default = new File(existingRaidFolder, "unknown");
 		IGNORE_RESULT(dir_cox.mkdir());
 		IGNORE_RESULT(dir_tob.mkdir());
 		IGNORE_RESULT(dir_toa.mkdir());
@@ -512,16 +515,41 @@ public class FileReadWriter {
 	 * into the shared plugin folder. False means the folder did not change.
 	 */
 	public boolean updateUsername(final String username) {
+		return updateUsername(username, null);
+	}
+
+	/** Keep earlier raid logs in their existing location when one is found. */
+	public boolean updateUsername(final String username, final String previousLogin) {
 		String folder = accountFolderName(username);
 		if (folder == null) {
 			return false;
 		}
-		if (folder.equals(this.username) && coxDir != null) {
+		File previous = findLegacyRaidFolder(previousLogin);
+		if (folder.equals(this.username) && Objects.equals(previous, legacyRaidFolder) && coxDir != null) {
 			return false;
 		}
 		this.username = folder;
+		legacyRaidFolder = previous;
 		createFolders();
 		return true;
+	}
+
+	private File findLegacyRaidFolder(String previousLogin) {
+		if (previousLogin == null) {
+			return null;
+		}
+		File pluginFolder = new File(storageRoot != null ? storageRoot : RUNELITE_DIR, "raid-data tracker");
+		String loginFolderName = accountFolderName(previousLogin);
+		if (loginFolderName == null && !previousLogin.isEmpty()) {
+			return null;
+		}
+		File candidate = loginFolderName == null ? pluginFolder : new File(pluginFolder, loginFolderName);
+		for (String raid : new String[] {"cox", "tob", "toa"}) {
+			if (new File(candidate, raid + "/raid_tracker_data.log").isFile()) {
+				return candidate;
+			}
+		}
+		return null;
 	}
 
 	/** A directory name for one character. Blank, current, parent, and path characters are refused. */

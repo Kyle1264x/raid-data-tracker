@@ -94,6 +94,31 @@ public class FracturedArchiveTest extends TestCase
 	}
 
 	@Test
+	public void earlierRaidsKeepTheirExistingLogs() throws IOException
+	{
+		Path pluginFolder = root.resolve("raid-data tracker");
+		Path sharedLog = pluginFolder.resolve("cox/raid_tracker_data.log");
+		Path loginLog = pluginFolder.resolve("login@example.com/tob/raid_tracker_data.log");
+		Files.createDirectories(sharedLog.getParent());
+		Files.createDirectories(loginLog.getParent());
+		Files.writeString(sharedLog, "{\"raidTime\":400}\n");
+		Files.writeString(loginLog, "{\"raidTime\":500}\n");
+
+		assertTrue(fw.updateUsername("First Character", ""));
+		assertEquals(sharedLog, Path.of(fw.getRaidFileName(RaidType.COX)));
+		assertEquals(1, fw.readFromFile(RaidType.COX).size());
+		assertEquals(pluginFolder.resolve("First Character/tfa/raid_tracker_data.log"),
+			Path.of(fw.getRaidFileName(RaidType.TFA)));
+
+		assertTrue(fw.updateUsername("Second Character", "login@example.com"));
+		assertEquals(loginLog, Path.of(fw.getRaidFileName(RaidType.TOB)));
+		assertEquals(1, fw.readFromFile(RaidType.TOB).size());
+		assertTrue(fw.readFromFile(RaidType.COX).isEmpty());
+		assertEquals(pluginFolder.resolve("Second Character/tfa/raid_tracker_data.log"),
+			Path.of(fw.getRaidFileName(RaidType.TFA)));
+	}
+
+	@Test
 	public void oneLineOmitsASkippedBoss() throws IOException
 	{
 		openAccount();

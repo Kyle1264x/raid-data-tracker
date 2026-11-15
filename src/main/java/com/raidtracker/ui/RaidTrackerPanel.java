@@ -62,12 +62,15 @@ import java.awt.image.AffineTransformOp;
 import java.awt.image.BufferedImage;
 import java.text.NumberFormat;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
+import java.util.Objects;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
@@ -296,8 +299,7 @@ public class RaidTrackerPanel extends PluginPanel {
         JPanel timeSplitsPanel = getTimeSplitsPanel();
         boolean theatreTab = selectedRaidTab.equals(RaidType.TOB);
         JPanel mvpPanel = theatreTab && config.showMVPs() ? getMvpPanel() : null;
-        JPanel pointsPanel = !theatreTab && !selectedRaidTab.equals(RaidType.TFA) && config.showPoints()
-            ? getPointsPanel() : null;
+        JPanel pointsPanel = !theatreTab && config.showPoints() ? getPointsPanel() : null;
 
         // Replaces panel.removeAll() to allow for selective component removal when dealing with ToA filter keypresses
         for (Component component : panel.getComponents()) {
@@ -682,33 +684,37 @@ public class RaidTrackerPanel extends PluginPanel {
     }
 
     private JPanel getPointsPanel() {
+        boolean archiveTab = selectedRaidTab == RaidType.TFA;
         final JPanel points = new JPanel();
-        points.setLayout(new GridLayout(0,2));
+        points.setLayout(new GridLayout(0, archiveTab ? 1 : 2));
         points.setBorder(new EmptyBorder(3, 3, 3, 3));
         points.setBackground(ColorScheme.DARKER_GRAY_COLOR.darker());
 
         JLabel personalTitle = textPanel("Personal Points");
-        JLabel totalTitle = textPanel("Total Points");
-
         points.add(personalTitle);
-        points.add(totalTitle);
 
-        int personalPoints = 0;
-        int totalPoints = 0;
+        List<RaidTracker> raids = loaded ? getFilteredRTList() : Collections.emptyList();
+        double personalPoints = archiveTab
+            ? raids.stream().map(RaidTracker::getContributionPoints).filter(Objects::nonNull).mapToDouble(Double::doubleValue).sum()
+            : atLeastZero(raids.stream().mapToLong(RaidTracker::getPersonalPoints).sum());
 
-        if (loaded) {
-            personalPoints = atLeastZero(getFilteredRTList().stream().mapToInt(RaidTracker::getPersonalPoints).sum());
-            totalPoints = atLeastZero(getFilteredRTList().stream().mapToInt(RaidTracker::getTotalPoints).sum());
-        }
-
-        JLabel personalPointsLabel = textPanel(format(personalPoints));
+        JLabel personalPointsLabel = textPanel(format(Math.round(personalPoints)));
         personalPointsLabel.setToolTipText(NumberFormat.getInstance().format(personalPoints) + " Personal Points");
         personalTitle.setToolTipText(NumberFormat.getInstance().format(personalPoints) + " Personal Points");
 
-        JLabel totalPointsLabel = textPanel(format(totalPoints));
-        totalPointsLabel.setToolTipText(NumberFormat.getInstance().format(totalPoints) + " Total Points");
-        totalTitle.setToolTipText(NumberFormat.getInstance().format(totalPoints) + " Total Points");
+        if (archiveTab) {
+            points.add(personalPointsLabel);
+            return points;
+        }
 
+        long totalPoints = atLeastZero(raids.stream().mapToLong(RaidTracker::getTotalPoints).sum());
+        JLabel totalTitle = textPanel("Total Points");
+        JLabel totalPointsLabel = textPanel(format(totalPoints));
+        String totalTooltip = NumberFormat.getInstance().format(totalPoints) + " Total Points";
+        totalPointsLabel.setToolTipText(totalTooltip);
+        totalTitle.setToolTipText(totalTooltip);
+
+        points.add(totalTitle);
         points.add(personalPointsLabel);
         points.add(totalPointsLabel);
 

@@ -125,6 +125,7 @@ public class RaidTrackerPlugin extends Plugin
 	private NavigationButton navButton;
 	private FracturedArchiveSession archive;
 	private String boundAccountName;
+	private String legacyLoginName;
 	/** Ticks left before an empty reward container is accepted as the real chest. */
 	private int archiveEmptyChestTicks;
 
@@ -150,6 +151,7 @@ public class RaidTrackerPlugin extends Plugin
 
 	@Override
 	protected void startUp() {
+		legacyLoginName = client.getUsername();
 		panel = new RaidTrackerPanel(itemManager, fw, config, clientThread, client, configManager, pluginManager);
 
 		final BufferedImage icon = ImageUtil.loadImageResource(getClass(), "panel-icon.png");
@@ -292,6 +294,10 @@ public class RaidTrackerPlugin extends Plugin
 	public void onGameStateChanged(GameStateChanged event) {
 		if (WorldUtils.playerOnBetaWorld(client)) {
 			return;
+		}
+
+		if (event.getGameState() == GameState.LOGGING_IN) {
+			legacyLoginName = client.getUsername();
 		}
 
 		if (client.getGameState() == GameState.LOGGED_IN) {
@@ -1312,7 +1318,7 @@ public class RaidTrackerPlugin extends Plugin
 			replaceRaidTracker();
 		}
 		boundAccountName = name;
-		if (fw.updateUsername(name) && panel != null) {
+		if (fw.updateUsername(name, legacyLoginName) && panel != null) {
 			SwingUtilities.invokeLater(() -> {
 				if (panel != null) {
 					panel.loadRTList();

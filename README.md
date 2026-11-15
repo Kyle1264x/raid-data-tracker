@@ -13,6 +13,7 @@ Logs CoX, ToB, ToA, and The Fractured Archive, like purple splits, total points 
 
 ## Data Storage
 Data is stored at `~/.runelite/raid-data tracker/<character name>/RAID/raid_tracker_data.log`, where `RAID` is cox, tob, toa, or tfa.
+Existing CoX, ToB, and ToA logs continue to use their original storage location.
 
 ## Bugs & Problems
 If you find any bugs or problems, feel free to message me on Discord - @raitab.
